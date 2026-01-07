@@ -11,8 +11,17 @@ const props = defineProps({
 
 const { onDockMove, layoutVersion } = inject(DockContext)
 
+/**
+ * Handle tab drag start
+ * 处理标签页拖拽开始
+ * 
+ * @param {DragEvent} e - Drag event (拖拽事件)
+ * @param {Object} tab - The tab object being dragged (被拖拽的标签页对象)
+ */
 const onDragStart = (e, tab) => {
   e.dataTransfer.effectAllowed = 'move'
+  // Transfer tab and panel IDs
+  // 传输标签页 ID 和面板 ID
   e.dataTransfer.setData('dock/tab', JSON.stringify({
     tabId: tab.id,
     panelId: props.panelData.id
@@ -26,6 +35,7 @@ const onTabClick = (tab) => {
 const onCloseClick = (e, tab) => {
   e.stopPropagation()
   // Use dockMove to handle removal properly, triggering cleanup logic
+  // 使用 dockMove 正确处理移除，触发清理逻辑
   onDockMove(tab, null, 'remove')
 }
 </script>
