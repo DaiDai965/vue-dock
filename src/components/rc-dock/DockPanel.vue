@@ -9,7 +9,7 @@ const props = defineProps<{
   panelData: DockPanel
 }>()
 
-const { onDockMove } = inject(DockContext) as any
+const { onDockMove } = inject(DockContext)!
 const dropZone = ref<DropDirectionType | null>(null)
 
 const onDragOver = (e: DragEvent) => {
@@ -50,7 +50,7 @@ const onDrop = (e: DragEvent) => {
   if (source.panelId === props.panelData.id && zone === DropDirection.MIDDLE) return
   
   if (zone) {
-      onDockMove({ id: source.tabId }, props.panelData.id, zone)
+      onDockMove({ id: source.tabId } as any, props.panelData.id, zone)
   }
 }
 

@@ -16,6 +16,14 @@ export interface DockTab {
   [key: string]: any
 }
 
+export interface DockContextType {
+  layout: any
+  onDockMove: (source: DockTab | DockPanel, target: DockTab | DockPanel | DockBox | string, direction: DropDirectionType) => void
+  findNode: (id: string) => DockBox | DockPanel | DockTab | undefined
+  layoutVersion: any
+  getTabComponent: (id: string) => Component | undefined
+}
+
 export interface DockPanel {
   id: string
   size?: number

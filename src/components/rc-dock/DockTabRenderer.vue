@@ -7,7 +7,7 @@ const props = defineProps<{
   tab: DockTab
 }>()
 
-const { getTabComponent } = inject(DockContext) as any
+const { getTabComponent } = inject(DockContext)!
 
 // Provide the current Tab ID to the inner component
 // 向内部组件提供当前标签页 ID

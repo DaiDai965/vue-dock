@@ -35,18 +35,22 @@ const tabKeys = ref<string[]>([]);
 
 // Persistence
 // 持久化逻辑
+let saveTimer: any = null;
 const saveLayout = () => {
-  try {
-    // Serialize layout, excluding non-serializable Vue components
-    // 序列化布局，排除不可序列化的 Vue 组件
-    const json = JSON.stringify(layout.value, (key, value) => {
-      if (key === "component") return undefined;
-      return value;
-    });
-    localStorage.setItem("dock-layout", json);
-  } catch (e) {
-    console.error("Failed to save layout", e);
-  }
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      // Serialize layout, excluding non-serializable Vue components
+      // 序列化布局，排除不可序列化的 Vue 组件
+      const json = JSON.stringify(layout.value, (key, value) => {
+        if (key === "component") return undefined;
+        return value;
+      });
+      localStorage.setItem("dock-layout", json);
+    } catch (e) {
+      console.error("Failed to save layout", e);
+    }
+  }, 500); // 500ms debounce (500ms 防抖)
 };
 
 const restoreLayout = () => {

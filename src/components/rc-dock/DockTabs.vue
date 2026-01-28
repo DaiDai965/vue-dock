@@ -7,7 +7,7 @@ const props = defineProps<{
   panelData: DockPanel;
 }>();
 
-const { onDockMove } = inject(DockContext) as any;
+const { onDockMove } = inject(DockContext)!;
 
 /**
  * Handle tab drag start
@@ -39,7 +39,7 @@ const onCloseClick = (e: Event, tab: DockTab) => {
   e.stopPropagation();
   // Use dockMove to handle removal properly, triggering cleanup logic
   // 使用 dockMove 正确处理移除，触发清理逻辑
-  onDockMove(tab, null, "remove");
+  onDockMove(tab, "remove", "remove");
 };
 </script>
 

@@ -1,7 +1,7 @@
 import type { InjectionKey } from 'vue'
-import type { DropDirectionType, TabState } from './types'
+import type { DropDirectionType, TabState, DockContextType } from './types'
 
-export const DockContext: InjectionKey<any> = Symbol('DockContext')
+export const DockContext: InjectionKey<DockContextType> = Symbol('DockContext')
 export const DockProvider: InjectionKey<any> = Symbol('DockProvider')
 
 /**

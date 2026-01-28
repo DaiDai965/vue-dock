@@ -6,7 +6,7 @@ import AboutView from '../views/AboutView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import type { DockBox, DockPanel } from './rc-dock/types'
 
-const { onDockMove, layout } = inject(DockContext) as any
+const { onDockMove, layout } = inject(DockContext)!
 
 const files = [
   { name: 'HomeView.vue', component: markRaw(HomeView) },
