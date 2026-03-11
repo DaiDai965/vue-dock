@@ -35,11 +35,12 @@ const findFirstPanel = (box: DockBox | DockPanel): DockPanel | null => {
 // Double click to open a tab in the editor area
 // 双击在编辑区打开一个标签页
 const onDoubleClick = (file: { name: string, component: any }) => {
+  const id = nextComponentId(file.name)
   const tab = {
      // Unique tab id per open instance
      // 每次打开生成唯一 tab id
-     id: nextComponentId(file.name),
-     title: file.name,
+     id,
+     title: id,
      componentName: file.name,
      component: file.component,
      closable: true
