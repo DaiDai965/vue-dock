@@ -1,7 +1,7 @@
-import type { Component, Ref } from "vue";
+import type { Component, CSSProperties, Ref, VNodeChild } from "vue";
 
-// Drag/drop direction union used across dock interactions
-// 拖拽放置方向的联合类型
+export type DockMode = "horizontal" | "vertical" | "float" | "window" | "maximize";
+
 export type DropDirectionType =
   | "left"
   | "right"
@@ -9,6 +9,8 @@ export type DropDirectionType =
   | "top"
   | "middle"
   | "remove"
+  | "before-tab"
+  | "after-tab"
   | "before"
   | "after"
   | "float"
@@ -19,74 +21,193 @@ export type DropDirectionType =
   | "active"
   | "update";
 
-// Single tab definition
-// 单个标签页定义
-export interface DockTab {
-  id: string;
-  title: string;
-  content?: string | Component;
+export interface TabGroup {
+  floatable?: boolean | "singleTab";
+  newWindow?: boolean;
+  disableDock?: boolean;
+  maximizable?: boolean;
+  tabLocked?: boolean;
+  animated?: boolean;
+  panelExtra?: (panel: DockPanel, context: DockContextType) => VNodeChild;
+  preferredFloatWidth?: [number, number];
+  preferredFloatHeight?: [number, number];
+  widthFlex?: number;
+  heightFlex?: number;
+  moreIcon?: VNodeChild;
+}
+
+export interface TabBase {
+  id?: string;
+  title?: VNodeChild;
+  content?: VNodeChild | Component | ((tab: DockTab) => VNodeChild);
   closable?: boolean;
   group?: string;
-  active?: boolean;
   componentName?: string;
+  cached?: boolean;
+  [key: string]: unknown;
+}
+
+export interface DockTab extends TabBase {
+  id: string;
+  title: VNodeChild;
+  content?: VNodeChild | Component | ((tab: DockTab) => VNodeChild);
+  active?: boolean;
   component?: Component;
   icon?: Component | string;
-  // Allow other properties for user custom data
-  [key: string]: any;
+  parent?: DockPanel;
 }
 
-// Context injected by DockLayout
-// DockLayout 注入的上下文
-export interface DockContextType {
-  layout: Ref<LayoutData>;
-  onDockMove: (
-    source: DockTab | DockPanel,
-    target: DockTab | DockPanel | DockBox | string,
-    direction: DropDirectionType,
-  ) => void;
-  findNode: (id: string) => DockBox | DockPanel | DockTab | undefined;
-  layoutVersion: Ref<number>;
-  getTabComponent: (id: string) => Component | undefined;
-}
-
-// Panel contains multiple tabs
-// 面板包含多个标签页
-export interface DockPanel {
-  id: string;
+export interface PanelBase {
+  id?: string;
   size?: number;
-  tabs: DockTab[];
+  tabs: TabBase[];
   activeId?: string;
   group?: string;
   x?: number;
   y?: number;
+  z?: number;
   w?: number;
   h?: number;
-  z?: number;
+}
+
+export interface DockPanel extends Omit<PanelBase, "id" | "tabs"> {
+  id: string;
+  tabs: DockTab[];
+  activeId?: string;
   minWidth?: number;
   minHeight?: number;
-  panelLock?: any; // PanelLock
+  widthFlex?: number;
+  heightFlex?: number;
+  panelLock?: PanelLock;
+  parent?: DockBox;
 }
 
-// Box contains panels or nested boxes
-// 盒子包含面板或子盒子
-export interface DockBox {
-  id: string;
-  mode?: "horizontal" | "vertical" | "float";
+export interface BoxBase {
+  id?: string;
+  mode: DockMode;
   size?: number;
-  children: (DockBox | DockPanel)[];
+  children: (BoxBase | PanelBase)[];
 }
 
-// Root layout tree structure
-// 布局树根结构
+export interface DockBox extends Omit<BoxBase, "id" | "children"> {
+  id: string;
+  children: (DockBox | DockPanel)[];
+  minWidth?: number;
+  minHeight?: number;
+  widthFlex?: number;
+  heightFlex?: number;
+  parent?: DockBox;
+}
+
+export interface LayoutBase {
+  dockbox: BoxBase;
+  floatbox?: BoxBase;
+  windowbox?: BoxBase;
+  maxbox?: BoxBase;
+}
+
 export interface LayoutData {
   dockbox: DockBox;
   floatbox?: DockBox;
   windowbox?: DockBox;
   maxbox?: DockBox;
+  loadedFrom?: LayoutBase;
 }
 
-// Persisted state per tab
-// 每个标签页的持久化状态
-export interface TabState {
-  [key: string]: any;
+export interface PanelLock {
+  panelStyle?: string;
+  minWidth?: number;
+  minHeight?: number;
+  panelExtra?: (panel: DockPanel) => VNodeChild;
+  widthFlex?: number;
+  heightFlex?: number;
 }
+
+export interface FloatSize {
+  width: number;
+  height: number;
+}
+
+export interface FloatPosition extends FloatSize {
+  left: number;
+  top: number;
+}
+
+export interface AddComponentTabOptions {
+  title?: string;
+  targetId?: string;
+  closable?: boolean;
+  direction?: DropDirectionType;
+}
+
+export interface LayoutProps {
+  dockId?: string;
+  defaultLayout?: LayoutData;
+  layout?: LayoutBase;
+  groups?: Record<string, TabGroup>;
+  dropMode?: "default" | "edge";
+  style?: CSSProperties;
+  onLayoutChange?: (
+    newLayout: LayoutBase,
+    currentTabId?: string,
+    direction?: DropDirectionType,
+  ) => void;
+  saveTab?: (tab: DockTab) => TabBase;
+  loadTab?: (tab: TabBase) => DockTab;
+  afterPanelSaved?: (savedPanel: PanelBase, panel: DockPanel) => void;
+  afterPanelLoaded?: (savedPanel: PanelBase, loadedPanel: DockPanel) => void;
+}
+
+export type DockMoveHandler = (
+  source: DockTab | DockPanel,
+  target: DockTab | DockPanel | DockBox | string | null,
+  direction: DropDirectionType,
+  floatPosition?: FloatPosition,
+) => void;
+
+export type FindNodeHandler = (
+  id: string,
+) => DockBox | DockPanel | DockTab | undefined;
+
+export interface DockContextType {
+  layout: Ref<LayoutData>;
+  getDockId: () => unknown;
+  useEdgeDrop: () => boolean;
+  setDropRect: (
+    element: HTMLElement | null,
+    direction?: DropDirectionType,
+    source?: unknown,
+    event?: { clientX: number; clientY: number },
+    panelSize?: [number, number],
+  ) => void;
+  getLayoutSize: () => FloatSize;
+  onSilentChange: (currentTabId?: string, direction?: DropDirectionType) => void;
+  navigateToPanel: (fromElement: HTMLElement, direction?: string) => void;
+  getRootElement: () => HTMLDivElement | null;
+  onDockMove: DockMoveHandler;
+  dockMove: DockMoveHandler;
+  addTab: (
+    tab: DockTab,
+    targetId?: string,
+    direction?: DropDirectionType,
+  ) => DockTab;
+  addComponentTab: (
+    componentName: string,
+    component: Component,
+    options?: AddComponentTabOptions,
+  ) => DockTab;
+  findNode: FindNodeHandler;
+  find: FindNodeHandler;
+  updateTab: (id: string, newTab: Partial<DockTab> | null, makeActive?: boolean) => boolean;
+  getGroup: (name?: string) => TabGroup;
+  layoutVersion: Ref<number>;
+  getTabComponent: (id: string) => Component | undefined;
+}
+
+export interface TabState {
+  [key: string]: unknown;
+}
+
+export type TabData = DockTab;
+export type PanelData = DockPanel;
+export type BoxData = DockBox;

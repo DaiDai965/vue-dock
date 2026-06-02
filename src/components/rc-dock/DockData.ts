@@ -1,15 +1,15 @@
+import { inject } from "vue";
 import type { InjectionKey } from "vue";
-import type { DropDirectionType, TabState, DockContextType } from "./types";
+import type {
+  DockContextType,
+  DropDirectionType,
+  TabGroup,
+  TabState,
+} from "./types";
 
-// Injection keys for dock context and provider
-// Dock 上下文与提供者的注入键
 export const DockContext: InjectionKey<DockContextType> = Symbol("DockContext");
-export const DockProvider: InjectionKey<any> = Symbol("DockProvider");
+export const DockProvider: InjectionKey<unknown> = Symbol("DockProvider");
 
-/**
- * Drop directions
- * 放置方向枚举
- */
 export const DropDirection: Record<string, DropDirectionType> = {
   LEFT: "left",
   RIGHT: "right",
@@ -17,32 +17,45 @@ export const DropDirection: Record<string, DropDirectionType> = {
   TOP: "top",
   MIDDLE: "middle",
   REMOVE: "remove",
-  BEFORE: "before",
-  AFTER: "after",
+  BEFORE: "before-tab",
+  AFTER: "after-tab",
+  BEFORE_TAB: "before-tab",
+  AFTER_TAB: "after-tab",
   FLOAT: "float",
   FRONT: "front",
   MAXIMIZE: "maximize",
   NEW_WINDOW: "new-window",
-  MOVE: "move", // Special internal (内部特殊状态)
-  ACTIVE: "active", // Special internal (内部特殊状态)
-  UPDATE: "update", // Special internal (内部特殊状态)
+  MOVE: "move",
+  ACTIVE: "active",
+  UPDATE: "update",
 };
 
-// Layout node type helpers
-// 布局节点类型辅助
+export const defaultGroup: TabGroup = {
+  floatable: true,
+  maximizable: true,
+};
+
+export const placeHolderStyle = "place-holder";
+export const maximePlaceHolderId = "-maximized-placeholder-";
+export const placeHolderGroup: TabGroup = {
+  floatable: false,
+};
+
 export const LayoutType = {
   Box: "box",
   Panel: "panel",
 };
 
-// Global state storage for tabs
-// 标签页的全局状态存储
 const tabStateStorage = new Map<string, TabState>();
+const componentIdCounters = new Map<string, number>();
 
-// Load initial state
-// 加载初始状态
+const getStorage = (): Storage | undefined => {
+  if (typeof window === "undefined") return undefined;
+  return window.localStorage;
+};
+
 try {
-  const saved = localStorage.getItem("dock-state");
+  const saved = getStorage()?.getItem("dock-state");
   if (saved) {
     const parsed = JSON.parse(saved);
     for (const [key, value] of Object.entries(parsed)) {
@@ -53,25 +66,17 @@ try {
   console.error("Failed to load dock state", e);
 }
 
-/**
- * Save all tab states to localStorage
- * 保存所有标签页状态到 localStorage
- */
 export function saveTabState() {
   try {
+    const storage = getStorage();
+    if (!storage) return;
     const obj = Object.fromEntries(tabStateStorage);
-    localStorage.setItem("dock-state", JSON.stringify(obj));
+    storage.setItem("dock-state", JSON.stringify(obj));
   } catch (e) {
     console.error("Failed to save dock state", e);
   }
 }
 
-/**
- * Get state object for a specific tab
- * 获取指定标签页的状态对象
- * @param {string} tabId
- * @returns {Object}
- */
 export function getTabState(tabId: string): TabState {
   if (!tabStateStorage.has(tabId)) {
     tabStateStorage.set(tabId, {});
@@ -79,18 +84,33 @@ export function getTabState(tabId: string): TabState {
   return tabStateStorage.get(tabId)!;
 }
 
-/**
- * Generate a random ID
- * 生成随机 ID
- */
 export function nextId(): string {
-  return "dock-" + Math.random().toString(36).substr(2, 9);
+  return "dock-" + Math.random().toString(36).slice(2, 11);
 }
-
-const componentIdCounters = new Map<string, number>();
 
 export function nextComponentId(componentName: string): string {
   const count = (componentIdCounters.get(componentName) ?? 0) + 1;
   componentIdCounters.set(componentName, count);
   return `${componentName}-${count}`;
+}
+
+export function seedComponentId(componentName: string, id: string) {
+  const prefix = `${componentName}-`;
+  if (!id.startsWith(prefix)) return;
+
+  const count = Number(id.slice(prefix.length));
+  if (!Number.isInteger(count) || count < 1) return;
+
+  componentIdCounters.set(
+    componentName,
+    Math.max(componentIdCounters.get(componentName) ?? 0, count),
+  );
+}
+
+export function useDock(): DockContextType {
+  const context = inject(DockContext);
+  if (!context) {
+    throw new Error("useDock must be called under DockLayout");
+  }
+  return context;
 }

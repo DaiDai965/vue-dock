@@ -1,55 +1,59 @@
 <script setup lang="ts">
-import { useTabState } from '../components/rc-dock/useTabState'
+import { useTabState } from "../components/rc-dock/useTabState";
 
 interface AboutState {
-  showDetails: boolean
-  rating: number
-  feedback: string
+  showDetails: boolean;
+  rating: number;
+  feedback: string;
 }
 
 const aboutState = useTabState<AboutState>({
   showDetails: true,
   rating: 5,
-  feedback: ''
-})
+  feedback: "",
+});
 </script>
 
 <template>
   <div class="about-view">
     <h1>About View</h1>
-    <p>This is a dock layout demo using Vue 3.</p>
-    
+    <p>This is a Vue 3 dock layout demo.</p>
+
     <div class="control-panel">
-       <label>
-         <input type="checkbox" v-model="aboutState.showDetails"> Show Details
-       </label>
+      <label>
+        <input v-model="aboutState.showDetails" type="checkbox" />
+        Show Details
+      </label>
     </div>
 
     <ul v-if="aboutState.showDetails" class="feature-list">
-      <li>Drag and drop support</li>
-      <li>Split panes</li>
-      <li>Dynamic components</li>
-      <li>State Persistence</li>
+      <li>Drag tabs and panels</li>
+      <li>Split panes in four directions</li>
+      <li>Float, maximize, and new-window panel actions</li>
+      <li>Per-tab state persistence</li>
     </ul>
-    
-    <div class="feedback-section">
+
+    <section class="feedback-section">
       <h3>Rate this demo</h3>
       <div class="stars">
-        <span 
-          v-for="i in 5" 
-          :key="i"
+        <button
+          v-for="index in 5"
+          :key="index"
+          type="button"
           class="star"
-          :class="{ active: i <= aboutState.rating }"
-          @click="aboutState.rating = i"
-        >★</span>
+          :class="{ active: index <= aboutState.rating }"
+          @click="aboutState.rating = index"
+        >
+          *
+        </button>
       </div>
-      
-      <textarea 
-        v-model="aboutState.feedback" 
+
+      <textarea
+        v-model="aboutState.feedback"
         placeholder="Leave your feedback here..."
         rows="3"
-      ></textarea>
-    </div>
+      />
+    </section>
   </div>
 </template>
 
@@ -60,36 +64,44 @@ const aboutState = useTabState<AboutState>({
   height: 100%;
   overflow-y: auto;
 }
-h1 { color: #646cff; margin-top: 0; }
+h1 {
+  color: #646cff;
+  margin-top: 0;
+}
 .control-panel {
   margin: 15px 0;
   padding: 10px;
   background: #2d2d2d;
   border-radius: 4px;
 }
-.feature-list { 
-  line-height: 1.6; 
+.feature-list {
+  line-height: 1.6;
   background: #252526;
   padding: 15px 15px 15px 35px;
   border-radius: 8px;
   border: 1px solid #333;
 }
-
 .feedback-section {
   margin-top: 20px;
   border-top: 1px solid #333;
   padding-top: 20px;
 }
 .stars {
-  font-size: 24px;
-  cursor: pointer;
+  display: flex;
+  gap: 4px;
   margin-bottom: 10px;
 }
 .star {
-  color: #444;
-  transition: color 0.2s;
+  border: 0;
+  background: transparent;
+  color: #555;
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 1;
+  padding: 0 2px;
 }
-.star:hover, .star.active {
+.star:hover,
+.star.active {
   color: #ffd700;
 }
 textarea {

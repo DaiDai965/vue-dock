@@ -1,26 +1,24 @@
 <script setup lang="ts">
-const props = defineProps<{
-  mode: string
-}>()
+defineProps<{
+  mode: string;
+}>();
 
 const emit = defineEmits<{
-  (e: 'start-resize', event: MouseEvent): void
-}>()
+  (event: "start-resize", mouseEvent: MouseEvent): void;
+}>();
 
-// Emit resize start to parent box
-// 通知父容器开始调整大小
-const onMouseDown = (e: MouseEvent) => {
-  e.preventDefault()
-  emit('start-resize', e)
-}
+const onMouseDown = (event: MouseEvent) => {
+  event.preventDefault();
+  emit("start-resize", event);
+};
 </script>
 
 <template>
-  <div 
-    class="dock-divider" 
+  <div
+    class="dock-divider"
     :class="'dock-divider-' + mode"
     @mousedown="onMouseDown"
-  ></div>
+  />
 </template>
 
 <style>

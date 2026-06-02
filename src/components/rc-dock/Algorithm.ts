@@ -1,405 +1,500 @@
-// Layout tree operations and drag/drop algorithm
-// 布局树操作与拖拽算法实现
-import { nextId, DropDirection } from './DockData'
-import type { LayoutData, DockBox, DockPanel, DockTab, DropDirectionType } from './types'
+import { DropDirection, maximePlaceHolderId, nextId, placeHolderStyle } from "./DockData";
+import type {
+  DockBox,
+  DockPanel,
+  DockTab,
+  DropDirectionType,
+  FloatPosition,
+  LayoutData,
+} from "./types";
 
-/**
- * Deep clone utility
- * 深度克隆工具函数
- */
+let zIndexSeed = 0;
+
+export enum Filter {
+  Tab = 1,
+  Panel = 1 << 1,
+  Box = 1 << 2,
+  Docked = 1 << 3,
+  Floated = 1 << 4,
+  Windowed = 1 << 5,
+  Max = 1 << 6,
+  EveryWhere = Docked | Floated | Windowed | Max,
+  AnyTab = Tab | EveryWhere,
+  AnyPanel = Panel | EveryWhere,
+  AnyTabPanel = Tab | Panel | EveryWhere,
+  All = Tab | Panel | Box | EveryWhere,
+}
+
+type FoundPanel = { panel: DockPanel; box: DockBox; index: number };
+type FoundTab = FoundPanel & { tab: DockTab; tabIndex: number };
+
 function clone<T>(obj: T): T {
-  if (obj === null || typeof obj !== 'object') return obj
-  if (Array.isArray(obj)) return obj.map(clone) as any as T
-  
-  const copy: any = {}
+  if (obj === null || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) return obj.map(clone) as T;
+
+  const copy: Record<string, unknown> = {};
   for (const key in obj) {
-    if (Object.prototype.hasOwnProperty.call(obj, key)) {
-      // Prevent deep cloning of Vue components or raw objects
-      // 防止深度克隆 Vue 组件或原始对象
-      if (key === 'component' || key === 'content' || key === 'icon') {
-          copy[key] = (obj as any)[key]
-      } else {
-          copy[key] = clone((obj as any)[key])
-      }
-    }
+    if (key === "parent") continue;
+    const value = (obj as Record<string, unknown>)[key];
+    copy[key] = key === "component" || key === "content" || key === "icon" ? value : clone(value);
   }
-  return copy as T
+  return copy as T;
 }
 
-/**
- * Find a node in the layout by ID
- * 根据 ID 在布局中查找节点
- * @param layout - The layout root object (布局根对象)
- * @param id - The node ID to find (要查找的节点 ID)
- * @param filter - Optional filter function (可选的过滤函数)
- * @returns - The found node or undefined (找到的节点或 undefined)
- */
-export function find(layout: LayoutData, id: string, filter?: (node: any) => boolean): DockBox | DockPanel | DockTab | undefined {
-  const result = findInBox(layout.dockbox, id, filter)
-  if (result) return result
-  if (layout.floatbox) {
-     const floatResult = findInBox(layout.floatbox, id, filter)
-     if (floatResult) return floatResult
-  }
-  return undefined
+function isBox(node: unknown): node is DockBox {
+  return !!node && typeof node === "object" && Array.isArray((node as DockBox).children);
 }
 
-/**
- * Recursive search helper
- * 递归查找辅助函数
- */
-function findInBox(box: DockBox | DockPanel, id: string, filter?: (node: any) => boolean): DockBox | DockPanel | DockTab | undefined {
-  if (!box) return undefined
-  if (box.id === id && (!filter || filter(box))) return box
-  
-  if ('children' in box && box.children) {
-    for (const child of box.children) {
-      if (child.id === id && (!filter || filter(child))) return child
-      
-      if ('tabs' in child && child.tabs) {
-        if (child.id === id && (!filter || filter(child))) return child
-        const tab = child.tabs.find(t => t.id === id)
-        if (tab && (!filter || filter(tab))) return tab
-      } else {
-        const result = findInBox(child as DockBox, id, filter)
-        if (result) return result
-      }
-    }
-  }
-  return undefined
+function isPanel(node: unknown): node is DockPanel {
+  return !!node && typeof node === "object" && Array.isArray((node as DockPanel).tabs);
 }
 
-/**
- * Update a tab's properties
- * 更新标签页属性
- */
-export function updateTab(layout: LayoutData, id: string, newTab: Partial<DockTab>): boolean {
-  const tab = find(layout, id) as DockTab
-  if (!tab) return false
-  Object.assign(tab, newTab)
-  return true
+function ensureBox(layout: LayoutData, key: "floatbox" | "windowbox" | "maxbox", mode: DockBox["mode"]): DockBox {
+  layout[key] ??= { id: `${mode}-box`, mode, children: [] };
+  return layout[key]!;
 }
 
-/**
- * Main function to handle drag and drop moves
- * 处理拖拽移动的主要函数
- * 
- * @param layout - Current layout state (当前布局状态)
- * @param source - Source tab/panel being moved (被移动的源标签页/面板)
- * @param target - Target node/id to drop onto (放置的目标节点/ID)
- * @param direction - Drop direction (e.g., 'left', 'right', 'middle', 'remove') (放置方向)
- * @returns - New layout state (新的布局状态)
- */
-// Move a tab or panel within the layout tree based on drop direction
-// 根据拖拽方向在布局树中移动标签页或面板
-export function dockMove(layout: LayoutData, source: DockTab | DockPanel, target: DockTab | DockPanel | DockBox | string, direction: DropDirectionType): LayoutData {
-  let currentLayout = clone(layout)
-  
-  // 1. Find and Remove Source
-  // 1. 查找并移除源节点
-  let sourceTab: DockTab | undefined
-  let sourcePanel: DockPanel | undefined
-  
-  // Helper to find parent panel of a tab
-  // 查找标签页所属父面板的辅助函数
-  const findParentPanel = (box: DockBox, tabId: string): DockPanel | null => {
-    if (!box || !box.children) return null
-    for (const child of box.children) {
-       if ('tabs' in child && child.tabs) {
-         if (child.tabs.find(t => t.id === tabId)) return child
-       } else {
-         const found = findParentPanel(child as DockBox, tabId)
-         if (found) return found
-       }
-    }
-    return null
-  }
-  
-  // If source has id, try to find it in layout
-  // 如果源有 ID，尝试在布局中查找它
-  if (source.id) {
-     sourcePanel = findParentPanel(currentLayout.dockbox, source.id) || undefined
-     if (!sourcePanel && currentLayout.floatbox) {
-         sourcePanel = findParentPanel(currentLayout.floatbox, source.id) || undefined
-     }
-  }
-  
-  if (sourcePanel) {
-    const idx = sourcePanel.tabs.findIndex(t => t.id === source.id)
-    if (idx > -1) {
-      sourceTab = sourcePanel.tabs[idx]
-      sourcePanel.tabs.splice(idx, 1)
-      
-      if (sourcePanel.activeId === source.id) {
-        sourcePanel.activeId = sourcePanel.tabs[0]?.id
-      }
-      
-      // Cleanup empty panel
-      // 清理空面板
-      if (sourcePanel.tabs.length === 0) {
-          removeNode(currentLayout.dockbox, sourcePanel.id)
-          if (currentLayout.floatbox) removeNode(currentLayout.floatbox, sourcePanel.id)
-      }
-    }
-  } else {
-      sourceTab = { ...(source as DockTab) }
-  }
-  
-  // ALWAYS cleanup tree after any removal operation to ensure stability
-  // Run multiple passes of cleanupTree until stable
-  // 任何移除操作后始终清理树以确保稳定性
-  // 运行多次 cleanupTree 直到稳定
-  cleanupTreeRoot(currentLayout.dockbox)
-  if (currentLayout.floatbox) cleanupTreeRoot(currentLayout.floatbox)
-  
-  // Special case: If editor-box itself was flattened (unlikely but safety check)
-  // or if editor-box is missing, we might have a problem.
-  // But cleanupTree preserves 'editor-box' ID.
-  // 特殊情况：如果 editor-box 本身被扁平化（不太可能，但作为安全检查）
-  // 或者如果 editor-box 丢失，可能会有问题。
-  // 但是 cleanupTree 会保留 'editor-box' ID。
-  
-  if (!sourceTab && direction !== DropDirection.REMOVE) return layout 
-  
-  if (direction === DropDirection.REMOVE) return currentLayout
-  
-  const targetId = typeof target === 'string' ? target : target.id
-  let targetNode = find(currentLayout, targetId)
-  
-  if (!targetNode && direction !== DropDirection.FLOAT) {
-      // If no target and not float, maybe append to root?
-      // For now, return as is
-      // 如果没有目标且不是浮动，可能追加到根？
-      // 目前保持原样返回
-      return currentLayout
-  }
-  
-  if (direction === DropDirection.FLOAT) {
-     // Handle float (simplified)
-     // Create a float panel
-     // 处理浮动（简化版）
-     return currentLayout
-  }
-  
-  // Type guards
-  const isDockPanel = (node: any): node is DockPanel => 'tabs' in node
-  const isDockBox = (node: any): node is DockBox => 'children' in node
-
-  if (targetNode && (direction === DropDirection.MIDDLE || direction === DropDirection.CENTER)) { // CENTER is not in DropDirectionType but checking just in case? DropDirectionType has MIDDLE
-      // Drop into existing tabs
-      // 放入现有的标签页中
-      if (isDockPanel(targetNode)) {
-          targetNode.tabs.push(sourceTab!)
-          targetNode.activeId = sourceTab!.id
-      } else if (isDockBox(targetNode)) {
-          // If dropping into a box (empty or not), create a panel inside it
-          // 如果放入一个盒子（无论是否为空），在其中创建一个面板
-          const newPanel: DockPanel = {
-            id: nextId(),
-            tabs: [sourceTab!],
-            activeId: sourceTab!.id,
-            // size undefined allows flex: 1 behavior for equal distribution
-            // size undefined 允许 flex: 1 行为以实现均匀分布
-            size: undefined
-          }
-          targetNode.children.push(newPanel)
-      }
-  } else if (targetNode) {
-      // Split layout
-      // 分割布局
-      const parentBox = findParentBox(currentLayout.dockbox, targetNode.id) || 
-                        (currentLayout.floatbox ? findParentBox(currentLayout.floatbox, targetNode.id) : null)
-      
-      if (parentBox) {
-         const newPanel: DockPanel = {
-             id: nextId(),
-             tabs: [sourceTab!],
-             activeId: sourceTab!.id,
-             // size undefined allows flex: 1 behavior for equal distribution
-             // size undefined 允许 flex: 1 行为以实现均匀分布
-             size: undefined, 
-             group: sourceTab!.group // Propagate group (传递分组)
-         }
-         
-         const reqMode = (direction === DropDirection.LEFT || direction === DropDirection.RIGHT) ? 'horizontal' : 'vertical'
-         const isFirst = (direction === DropDirection.LEFT || direction === DropDirection.TOP)
-         
-         if (parentBox.mode === reqMode) {
-             // Same direction, just insert
-             // 方向相同，直接插入
-             const idx = parentBox.children.indexOf(targetNode as DockBox | DockPanel)
-             parentBox.children.splice(isFirst ? idx : idx + 1, 0, newPanel)
-             
-             // Also reset targetNode size to undefined to ensure they share space equally
-             // 同时将 targetNode 大小重置为 undefined 以确保它们平分空间
-             targetNode.size = undefined
-         } else {
-             // Different direction, wrap in new box
-             // 方向不同，包裹在新盒子中
-             const newBox: DockBox = {
-                 id: nextId(),
-                 mode: reqMode,
-                 children: isFirst ? [newPanel, targetNode as DockBox | DockPanel] : [targetNode as DockBox | DockPanel, newPanel],
-                 size: targetNode.size
-             }
-             const idx = parentBox.children.indexOf(targetNode as DockBox | DockPanel)
-             parentBox.children[idx] = newBox
-             // Reset target size to flex 1 inside new box?
-             // 在新盒子中重置目标大小为 flex 1？
-             targetNode.size = undefined 
-         }
-      } else if (targetNode === currentLayout.dockbox) {
-          // Root split
-          // 根节点分割
-          const newPanel: DockPanel = {
-            id: nextId(),
-            tabs: [sourceTab!],
-            activeId: sourceTab!.id,
-            size: undefined
-          }
-           const reqMode = (direction === DropDirection.LEFT || direction === DropDirection.RIGHT) ? 'horizontal' : 'vertical'
-           const isFirst = (direction === DropDirection.LEFT || direction === DropDirection.TOP)
-           
-           if (currentLayout.dockbox.mode === reqMode) {
-                currentLayout.dockbox.children.splice(isFirst ? 0 : currentLayout.dockbox.children.length, 0, newPanel)
-           } else {
-                const newChildBox: DockBox = {
-                    id: nextId(),
-                    mode: currentLayout.dockbox.mode,
-                    children: currentLayout.dockbox.children,
-                    size: undefined // Was 100, but root children should probably be flex? Or keep 100%?
-                }
-                // Actually root box children size depends on root box mode.
-                // But newChildBox is inside dockbox. 
-                
-                currentLayout.dockbox.mode = reqMode
-                currentLayout.dockbox.children = isFirst ? [newPanel, newChildBox] : [newChildBox, newPanel]
-           }
-      }
-  }
-  
-  return currentLayout
-}
-
-/**
- * Find parent box of a child ID
- * 查找子 ID 的父盒子
- */
-function findParentBox(box: DockBox, childId: string): DockBox | null {
-  if (!box || !box.children) return null
+function attachParentsInBox(box: DockBox | undefined, parent?: DockBox) {
+  if (!box) return;
+  box.parent = parent;
   for (const child of box.children) {
-    if (child.id === childId) return box
-    if ('children' in child) {
-        const result = findParentBox(child as DockBox, childId)
-        if (result) return result
+    child.parent = box;
+    if (isPanel(child)) {
+      for (const tab of child.tabs) {
+        tab.parent = child;
+      }
+    } else {
+      attachParentsInBox(child, box);
     }
   }
-  return null
 }
 
-/**
- * Remove a node from the tree
- * 从树中移除节点
- */
-function removeNode(box: DockBox, childId: string): boolean {
-  if (!box || !box.children) return false
-  const idx = box.children.findIndex(c => c.id === childId)
-  if (idx > -1) {
-    box.children.splice(idx, 1)
-    return true
-  }
-  
-  for (let i = 0; i < box.children.length; i++) {
-     const child = box.children[i]
-     if ('children' in child) {
-         if (removeNode(child as DockBox, childId)) {
-            // We don't remove empty parent here, we let cleanupTree handle it
-            // 我们不在这里移除空父节点，让 cleanupTree 处理
-         }
-     }
-  }
-  return false
+export function attachParents(layout: LayoutData): LayoutData {
+  attachParentsInBox(layout.dockbox);
+  attachParentsInBox(layout.floatbox);
+  attachParentsInBox(layout.windowbox);
+  attachParentsInBox(layout.maxbox);
+  return layout;
 }
 
-/**
- * Clean up the layout tree (remove empty boxes, flatten nested boxes)
- * 清理布局树（移除空盒子，扁平化嵌套盒子）
- * @param box - The box to clean (要清理的盒子)
- * @returns - Whether any changes were made (是否发生了更改)
- */
-function cleanupTree(box: DockBox): boolean {
-  if (!box || !box.children) return false // Return boolean indicating if changes were made
+export function nextZIndex(current?: number): number {
+  if (current === zIndexSeed) return current;
+  zIndexSeed += 1;
+  return zIndexSeed;
+}
 
-  let changed = false
-  
-  // We need to loop because modifying array indices can mess up iteration, 
-  // and one change might enable another.
-  // But a simple recursive approach that returns 'changed' and re-runs is safer.
-  // 我们需要循环，因为修改数组索引会打乱迭代，
-  // 并且一个更改可能会启用另一个更改。
-  // 但是简单的递归方法返回 'changed' 并重新运行更安全。
-  
-  // Let's use a simple robust loop over children
-  // 让我们使用一个简单的健壮循环遍历子节点
-  for (let i = 0; i < box.children.length; i++) {
-    const child = box.children[i]
-    
-    if ('children' in child && child.children) {
-        // Recurse first
-        // 先递归
-        if (cleanupTree(child as DockBox)) {
-            changed = true
-        }
-        
-        if (child.children.length === 0) {
-            if (child.id === 'editor-box') {
-                // Keep editor-box
-                // 保留 editor-box
-            } else {
-                box.children.splice(i, 1)
-                i--
-                changed = true
-            }
-        } else if (child.children.length === 1) {
-            if (child.id === 'editor-box') {
-                const grandChild = child.children[0]
-                if ('children' in grandChild) { // grandChild is a Box
-                     // Merge Box into editor-box
-                     // 将盒子合并到 editor-box 中
-                     child.mode = grandChild.mode
-                     child.children = grandChild.children
-                     changed = true
-                     // We modified child, so we should re-evaluate this child (now grandChild content)
-                     // But simplest is to just flag changed=true and let the caller re-run if needed
-                     // Or decrement i? No, child is still at i.
-                     // But child's children changed. 
-                     // We should continue processing this node?
-                     // Actually, if we merged, child.children IS grandChild.children.
-                     // We might need to recurse on it again?
-                     // Let's just set changed=true.
-                     // 我们修改了 child，所以应该重新评估这个 child（现在是 grandChild 内容）
-                     // 但最简单的方法是标记 changed=true，让调用者根据需要重新运行
-                }
-            } else {
-                const grandChild = child.children[0]
-                // Preserve size if it exists, otherwise inherit from child
-                // 如果存在大小则保留，否则从子节点继承
-                if (child.size !== undefined) grandChild.size = child.size
-                
-                box.children[i] = grandChild
-                changed = true
-            }
-        }
+function findInBox(box: DockBox | undefined, id: string, filter: Filter): DockBox | DockPanel | DockTab | undefined {
+  if (!box) return undefined;
+  if ((filter & Filter.Box) && box.id === id) return box;
+
+  for (const child of box.children) {
+    if (isBox(child)) {
+      const found = findInBox(child, id, filter);
+      if (found) return found;
+      continue;
+    }
+
+    if ((filter & Filter.Panel) && child.id === id) return child;
+    if (filter & Filter.Tab) {
+      const tab = child.tabs.find((item) => item.id === id);
+      if (tab) return tab;
     }
   }
-  return changed
+
+  return undefined;
 }
 
-// Wrapper to run until stable
-// 运行直到稳定的包装器
-function cleanupTreeRoot(box: DockBox) {
-    let maxLoops = 10
-    while (cleanupTree(box) && maxLoops > 0) {
-        maxLoops--
+export function find(layout: LayoutData, id: string, filter: Filter = Filter.AnyTabPanel): DockBox | DockPanel | DockTab | undefined {
+  if ((filter & Filter.Docked) || !(filter & Filter.EveryWhere)) {
+    const found = findInBox(layout.dockbox, id, filter);
+    if (found) return found;
+  }
+  if (filter & Filter.Floated) {
+    const found = findInBox(layout.floatbox, id, filter);
+    if (found) return found;
+  }
+  if (filter & Filter.Windowed) {
+    const found = findInBox(layout.windowbox, id, filter);
+    if (found) return found;
+  }
+  if (filter & Filter.Max) {
+    const found = findInBox(layout.maxbox, id, filter);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function findPanelInBox(box: DockBox | undefined, panelId: string): FoundPanel | null {
+  if (!box) return null;
+
+  for (let index = 0; index < box.children.length; index += 1) {
+    const child = box.children[index];
+    if (isPanel(child) && child.id === panelId) return { panel: child, box, index };
+    if (isBox(child)) {
+      const found = findPanelInBox(child, panelId);
+      if (found) return found;
     }
+  }
+
+  return null;
+}
+
+function findTabInBox(box: DockBox | undefined, tabId: string): FoundTab | null {
+  if (!box) return null;
+
+  for (let index = 0; index < box.children.length; index += 1) {
+    const child = box.children[index];
+    if (isPanel(child)) {
+      const tabIndex = child.tabs.findIndex((tab) => tab.id === tabId);
+      if (tabIndex >= 0) {
+        return { panel: child, box, index, tab: child.tabs[tabIndex], tabIndex };
+      }
+    } else if (isBox(child)) {
+      const found = findTabInBox(child, tabId);
+      if (found) return found;
+    }
+  }
+
+  return null;
+}
+
+function findPanel(layout: LayoutData, panelId: string): FoundPanel | null {
+  return (
+    findPanelInBox(layout.dockbox, panelId) ??
+    findPanelInBox(layout.floatbox, panelId) ??
+    findPanelInBox(layout.windowbox, panelId) ??
+    findPanelInBox(layout.maxbox, panelId)
+  );
+}
+
+function findTab(layout: LayoutData, tabId: string): FoundTab | null {
+  return (
+    findTabInBox(layout.dockbox, tabId) ??
+    findTabInBox(layout.floatbox, tabId) ??
+    findTabInBox(layout.windowbox, tabId) ??
+    findTabInBox(layout.maxbox, tabId)
+  );
+}
+
+function toPanel(source: DockTab | DockPanel): DockPanel {
+  if (isPanel(source)) return source;
+  return {
+    id: nextId(),
+    tabs: [source],
+    activeId: source.id,
+    group: source.group,
+  };
+}
+
+function removeEmptyPanel(found: FoundPanel) {
+  if (found.panel.tabs.length || found.panel.panelLock) return;
+  found.box.children.splice(found.index, 1);
+}
+
+function removeSource(layout: LayoutData, source: DockTab | DockPanel): DockTab | DockPanel | null {
+  if (isPanel(source)) {
+    const found = findPanel(layout, source.id);
+    if (!found) return clone(source);
+    found.box.children.splice(found.index, 1);
+    return found.panel;
+  }
+
+  const found = findTab(layout, source.id);
+  if (!found) return clone(source);
+
+  const [tab] = found.panel.tabs.splice(found.tabIndex, 1);
+  if (found.panel.activeId === source.id) {
+    found.panel.activeId = found.panel.tabs[Math.min(found.tabIndex, found.panel.tabs.length - 1)]?.id;
+  }
+  removeEmptyPanel(found);
+  return tab;
+}
+
+function targetPanel(layout: LayoutData, target: DockBox | DockPanel | DockTab | string | null): DockPanel | null {
+  if (!target) return null;
+  const targetId = typeof target === "string" ? target : target.id;
+  const panel = findPanel(layout, targetId)?.panel;
+  if (panel) return panel;
+  return findTab(layout, targetId)?.panel ?? null;
+}
+
+function targetBox(layout: LayoutData, target: DockBox | DockPanel | DockTab | string | null): DockBox | null {
+  if (!target) return null;
+  const targetId = typeof target === "string" ? target : target.id;
+  const found = find(layout, targetId, Filter.Box | Filter.EveryWhere);
+  return isBox(found) ? found : null;
+}
+
+function addTabToPanel(panel: DockPanel, source: DockTab | DockPanel, index = panel.tabs.length) {
+  const tabs = isPanel(source) ? source.tabs : [source];
+  panel.tabs.splice(index, 0, ...tabs);
+  panel.activeId = tabs[tabs.length - 1]?.id ?? panel.activeId;
+}
+
+function splitTarget(layout: LayoutData, source: DockTab | DockPanel, target: DockBox | DockPanel | DockTab | string | null, direction: DropDirectionType) {
+  const panel = targetPanel(layout, target);
+  const box = panel ? findPanel(layout, panel.id)?.box : targetBox(layout, target);
+  const targetNode = panel ?? targetBox(layout, target);
+  if (!box || !targetNode) return;
+
+  const newPanel = toPanel(source);
+  const mode = direction === DropDirection.LEFT || direction === DropDirection.RIGHT ? "horizontal" : "vertical";
+  const insertBefore = direction === DropDirection.LEFT || direction === DropDirection.TOP;
+
+  if (box.mode === mode) {
+    const index = box.children.indexOf(targetNode);
+    box.children.splice(insertBefore ? index : index + 1, 0, newPanel);
+    targetNode.size = undefined;
+    return;
+  }
+
+  const index = box.children.indexOf(targetNode);
+  const newBox: DockBox = {
+    id: nextId(),
+    mode,
+    size: targetNode.size,
+    children: insertBefore ? [newPanel, targetNode] : [targetNode, newPanel],
+  };
+  targetNode.size = undefined;
+  box.children[index] = newBox;
+}
+
+function addToFloat(layout: LayoutData, source: DockTab | DockPanel, key: "floatbox" | "windowbox", position?: FloatPosition) {
+  const panel = toPanel(source);
+  const box = ensureBox(layout, key, key === "windowbox" ? "window" : "float");
+  panel.x = position?.left ?? panel.x ?? 100;
+  panel.y = position?.top ?? panel.y ?? 80;
+  panel.w = position?.width ?? panel.w ?? 320;
+  panel.h = position?.height ?? panel.h ?? 240;
+  panel.z = nextZIndex(panel.z);
+  box.children.push(panel);
+}
+
+function maximize(layout: LayoutData, source: DockTab | DockPanel) {
+  const box = ensureBox(layout, "maxbox", "maximize");
+
+  const sourcePanel = isPanel(source)
+    ? findPanel(layout, source.id)?.panel
+    : findTab(layout, source.id)?.panel;
+  if (!sourcePanel) return;
+
+  const maximizedPanel = findPanelInBox(box, sourcePanel.id);
+  if (maximizedPanel) {
+    const [panel] = box.children.splice(maximizedPanel.index, 1) as DockPanel[];
+    const placeholder = findPanel(layout, maximePlaceHolderId);
+    if (placeholder) {
+      panel.size = placeholder.panel.size;
+      placeholder.box.children[placeholder.index] = panel;
+    } else {
+      layout.dockbox.children.push(panel);
+    }
+    return;
+  }
+
+  if (box.children.length) return;
+
+  const found = findPanel(layout, sourcePanel.id);
+  if (!found) return;
+
+  const placeholder: DockPanel = {
+    id: maximePlaceHolderId,
+    tabs: [],
+    group: placeHolderStyle,
+    panelLock: {},
+    size: found.panel.size,
+  };
+  found.box.children[found.index] = placeholder;
+  found.panel.size = undefined;
+  box.children = [found.panel];
+}
+
+function cleanupBox(box: DockBox | undefined): boolean {
+  if (!box) return false;
+  let changed = false;
+
+  for (let index = 0; index < box.children.length; index += 1) {
+    const child = box.children[index];
+    if (!isBox(child)) continue;
+
+    changed = cleanupBox(child) || changed;
+
+    if (!child.children.length) {
+      box.children.splice(index, 1);
+      index -= 1;
+      changed = true;
+    } else if (child.children.length === 1 && child.id !== "editor-box") {
+      const onlyChild = child.children[0];
+      if (child.size !== undefined) onlyChild.size = child.size;
+      box.children[index] = onlyChild;
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+function cleanupLayout(layout: LayoutData) {
+  for (const box of [layout.dockbox, layout.floatbox, layout.windowbox, layout.maxbox]) {
+    let guard = 20;
+    while (cleanupBox(box) && guard > 0) guard -= 1;
+  }
+
+  if (!layout.maxbox?.children.length) {
+    const placeholder = findPanel(layout, maximePlaceHolderId);
+    if (placeholder) {
+      placeholder.box.children.splice(placeholder.index, 1);
+    }
+  }
+
+  if (!layout.dockbox.children.length) {
+    layout.dockbox.children.push({
+      id: `${placeHolderStyle}-panel`,
+      group: placeHolderStyle,
+      panelLock: {},
+      size: 200,
+      tabs: [],
+    });
+  }
+}
+
+export function updateTab(layout: LayoutData, id: string, newTab: Partial<DockTab>): boolean {
+  const tab = find(layout, id, Filter.AnyTab) as DockTab | undefined;
+  if (!tab) return false;
+  Object.assign(tab, newTab);
+  return true;
+}
+
+export function dockMove(
+  layout: LayoutData,
+  source: DockTab | DockPanel,
+  target: DockTab | DockPanel | DockBox | string | null,
+  direction: DropDirectionType,
+  floatPosition?: FloatPosition,
+): LayoutData {
+  const nextLayout = clone(layout);
+  attachParents(nextLayout);
+  if (direction === DropDirection.MOVE || direction === DropDirection.ACTIVE || direction === DropDirection.UPDATE) {
+    return attachParents(nextLayout);
+  }
+
+  if (direction === DropDirection.FRONT) {
+    const panel = isPanel(source) ? findPanel(nextLayout, source.id)?.panel : targetPanel(nextLayout, source.id);
+    if (panel) panel.z = nextZIndex(panel.z);
+    return attachParents(nextLayout);
+  }
+
+  if (direction === DropDirection.MAXIMIZE) {
+    maximize(nextLayout, source);
+    return attachParents(nextLayout);
+  }
+
+  const movingSource = direction === DropDirection.REMOVE ? source : removeSource(nextLayout, source);
+
+  cleanupLayout(nextLayout);
+
+  if (direction === DropDirection.REMOVE) return attachParents(nextLayout);
+  if (!movingSource) return layout;
+
+  if (direction === DropDirection.FLOAT) {
+    addToFloat(nextLayout, movingSource, "floatbox", floatPosition);
+    return attachParents(nextLayout);
+  }
+
+  if (direction === DropDirection.NEW_WINDOW) {
+    addToFloat(nextLayout, movingSource, "windowbox", floatPosition);
+    return attachParents(nextLayout);
+  }
+
+  const panel = targetPanel(nextLayout, target);
+  if (
+    panel &&
+    (direction === DropDirection.MIDDLE ||
+      direction === DropDirection.BEFORE ||
+      direction === DropDirection.AFTER ||
+      direction === "before" ||
+      direction === "after")
+  ) {
+    const targetId = typeof target === "string" ? target : target?.id;
+    const tabIndex = targetId ? panel.tabs.findIndex((tab) => tab.id === targetId) : -1;
+    if (direction === DropDirection.BEFORE || direction === "before") {
+      addTabToPanel(panel, movingSource, Math.max(tabIndex, 0));
+    } else if (direction === DropDirection.AFTER || direction === "after") {
+      addTabToPanel(panel, movingSource, tabIndex >= 0 ? tabIndex + 1 : panel.tabs.length);
+    } else {
+      addTabToPanel(panel, movingSource);
+    }
+    return attachParents(nextLayout);
+  }
+
+  const box = targetBox(nextLayout, target);
+  if (box && direction === DropDirection.MIDDLE) {
+    box.children.push(toPanel(movingSource));
+    return attachParents(nextLayout);
+  }
+
+  splitTarget(nextLayout, movingSource, target, direction);
+  cleanupLayout(nextLayout);
+  return attachParents(nextLayout);
+}
+
+export function getFloatPanelSize(panel: HTMLElement | null, tabGroup?: { preferredFloatWidth?: [number, number]; preferredFloatHeight?: [number, number] }) {
+  const rect = panel?.getBoundingClientRect();
+  const width = Math.min(Math.max(rect?.width ?? 320, tabGroup?.preferredFloatWidth?.[0] ?? 100), tabGroup?.preferredFloatWidth?.[1] ?? 600);
+  const height = Math.min(Math.max(rect?.height ?? 240, tabGroup?.preferredFloatHeight?.[0] ?? 50), tabGroup?.preferredFloatHeight?.[1] ?? 500);
+  return [width, height] as const;
+}
+
+export function fixFloatPanelPos(layout: LayoutData, layoutWidth = 0, layoutHeight = 0): LayoutData {
+  const nextLayout = clone(layout);
+  for (const box of [nextLayout.floatbox, nextLayout.windowbox]) {
+    for (const child of box?.children ?? []) {
+      if (!isPanel(child)) continue;
+      child.x = Math.min(Math.max(child.x ?? 0, 16 - (child.w ?? 320)), Math.max(layoutWidth - 16, 0));
+      child.y = Math.min(Math.max(child.y ?? 0, 0), Math.max(layoutHeight - 16, 0));
+    }
+  }
+  return nextLayout;
+}
+
+export function fixLayoutData(layout: LayoutData): LayoutData {
+  const nextLayout = clone(layout);
+  nextLayout.floatbox ??= { id: "floatbox", mode: "float", children: [] };
+  nextLayout.windowbox ??= { id: "windowbox", mode: "window", children: [] };
+  nextLayout.maxbox ??= { id: "maxbox", mode: "maximize", children: [] };
+  cleanupLayout(nextLayout);
+  return attachParents(nextLayout);
+}
+
+export function findNearestPanel(rectFrom: DOMRect, rectTo: DOMRect, direction: string): number {
+  let distance = -1;
+  let overlap = -1;
+  let alignment = 0;
+
+  switch (direction) {
+    case "ArrowUp":
+      distance = rectFrom.top - rectTo.bottom + rectFrom.height;
+      overlap = Math.min(rectFrom.right, rectTo.right) - Math.max(rectFrom.left, rectTo.left);
+      break;
+    case "ArrowDown":
+      distance = rectTo.top - rectFrom.bottom + rectFrom.height;
+      overlap = Math.min(rectFrom.right, rectTo.right) - Math.max(rectFrom.left, rectTo.left);
+      break;
+    case "ArrowLeft":
+      distance = rectFrom.left - rectTo.right + rectFrom.width;
+      overlap = Math.min(rectFrom.bottom, rectTo.bottom) - Math.max(rectFrom.top, rectTo.top);
+      alignment = Math.abs(rectFrom.top - rectTo.top);
+      break;
+    case "ArrowRight":
+      distance = rectTo.left - rectFrom.right + rectFrom.width;
+      overlap = Math.min(rectFrom.bottom, rectTo.bottom) - Math.max(rectFrom.top, rectTo.top);
+      alignment = Math.abs(rectFrom.top - rectTo.top);
+      break;
+  }
+
+  if (distance < 0 || overlap <= 0) return -1;
+  return distance * (alignment + 1) - overlap * 0.001;
+}
+
+export function getUpdatedObject<T>(obj: T): T {
+  return obj;
 }

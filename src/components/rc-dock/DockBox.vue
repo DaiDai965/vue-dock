@@ -2,6 +2,7 @@
 import { shallowRef } from "vue";
 import DockPanel from "./DockPanel.vue";
 import Divider from "./Divider.vue";
+import { DropDirection, useDock } from "./DockData";
 import type {
   DockBox as DockBoxType,
   DockPanel as DockPanelType,
@@ -18,6 +19,26 @@ const isPanel = (item: DockBoxType | DockPanelType): item is DockPanelType => {
 };
 
 const boxRef = shallowRef<HTMLElement | null>(null);
+const { onSilentChange } = useDock();
+
+const childMinSize = (child: DockBoxType | DockPanelType) => {
+  return props.boxData.mode === "horizontal"
+    ? child.minWidth ?? 30
+    : child.minHeight ?? 30;
+};
+
+const childFlex = (child: DockBoxType | DockPanelType) => {
+  if (typeof child.size === "number") return `0 0 ${child.size}px`;
+  if (child.size) return child.size;
+  return props.boxData.mode === "horizontal"
+    ? child.widthFlex ?? 1
+    : child.heightFlex ?? 1;
+};
+
+const childStyle = (child: DockBoxType | DockPanelType) => ({
+  flex: childFlex(child),
+  overflow: "hidden",
+});
 
 // Start drag resize between two siblings
 // 开始拖拽调整相邻面板大小
@@ -59,7 +80,7 @@ const onResizeStart = (index: number, e: MouseEvent) => {
     const newPrevSize = startPrevSize + delta;
     const newNextSize = startNextSize - delta;
 
-    if (newPrevSize > 30 && newNextSize > 30) {
+    if (newPrevSize >= childMinSize(prevItem) && newNextSize >= childMinSize(nextItem)) {
       prevItem.size = newPrevSize;
       nextItem.size = newNextSize;
     }
@@ -68,6 +89,7 @@ const onResizeStart = (index: number, e: MouseEvent) => {
   const handleUp = () => {
     document.removeEventListener("mousemove", handleMove);
     document.removeEventListener("mouseup", handleUp);
+    onSilentChange(undefined, DropDirection.MOVE);
   };
 
   document.addEventListener("mousemove", handleMove);
@@ -81,24 +103,12 @@ const onResizeStart = (index: number, e: MouseEvent) => {
       <DockBox
         v-if="!isPanel(child)"
         :box-data="child"
-        :style="{
-          flex:
-            typeof child.size === 'number'
-              ? `0 0 ${child.size}px`
-              : child.size || 1,
-          overflow: 'hidden',
-        }"
+        :style="childStyle(child)"
       />
       <DockPanel
         v-else
         :panel-data="child"
-        :style="{
-          flex:
-            typeof child.size === 'number'
-              ? `0 0 ${child.size}px`
-              : child.size || 1,
-          overflow: 'hidden',
-        }"
+        :style="childStyle(child)"
       />
 
       <Divider

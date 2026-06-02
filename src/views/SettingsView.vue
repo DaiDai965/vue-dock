@@ -1,35 +1,32 @@
 <script setup lang="ts">
-import { useTabState } from '../components/rc-dock/useTabState'
+import { useTabState } from "../components/rc-dock/useTabState";
 
 interface SettingsState {
-  theme: string
-  notifications: boolean
+  theme: string;
+  notifications: boolean;
 }
 
-// Automatically persistent state scoped to this tab
 const settings = useTabState<SettingsState>({
-  theme: 'Dark',
-  notifications: true
-})
+  theme: "Dark",
+  notifications: true,
+});
 </script>
 
 <template>
   <div class="settings-view">
     <h1>Settings</h1>
     <div class="form-group">
-      <label>Theme</label>
-      <select v-model="settings.theme">
+      <label for="theme-select">Theme</label>
+      <select id="theme-select" v-model="settings.theme">
         <option>Dark</option>
         <option>Light</option>
       </select>
     </div>
-    <div class="form-group">
-      <label>Notifications</label>
-      <input type="checkbox" v-model="settings.notifications" /> Enable
+    <div class="form-group inline">
+      <input id="notifications" v-model="settings.notifications" type="checkbox" />
+      <label for="notifications">Enable notifications</label>
     </div>
-    <div style="margin-top: 20px; color: #888;">
-        Current: {{ settings.theme }}
-    </div>
+    <div class="current">Current theme: {{ settings.theme }}</div>
   </div>
 </template>
 
@@ -37,21 +34,39 @@ const settings = useTabState<SettingsState>({
 .settings-view {
   padding: 20px;
   color: #cccccc;
+  height: 100%;
+  overflow: auto;
 }
-h1 { color: #e1b12c; }
+h1 {
+  color: #e1b12c;
+  margin-top: 0;
+}
 .form-group {
   margin-bottom: 15px;
+}
+.form-group.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 label {
   display: block;
   margin-bottom: 5px;
-  font-weight: bold;
+  font-weight: 700;
 }
-select, input {
+.form-group.inline label {
+  margin-bottom: 0;
+}
+select,
+input {
   padding: 5px;
   background: #3c3c3c;
   color: white;
   border: 1px solid #555;
   border-radius: 4px;
+}
+.current {
+  margin-top: 20px;
+  color: #888;
 }
 </style>
